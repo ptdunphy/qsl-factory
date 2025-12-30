@@ -1,206 +1,395 @@
 'use client';
 
-import React, { useState, useRef } from 'react';
-import { Upload, RefreshCw, Printer, Radio } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { 
+  Upload, 
+  RotateCcw, 
+  Move, 
+  Layers, 
+  AlertTriangle, 
+  Info, 
+  CheckCircle2, 
+  CreditCard,
+  Eye,
+  Type
+} from 'lucide-react';
 
-// TypeScript Interface for the Card Design State
-interface QslDesign {
-  callsign: string;
-  gridSquare: string;
-  backgroundUrl: string;
-  themeColor: string; // Hex or Tailwind class
-  qsoData: {
-    toCall: string;
-    date: string;
-    time: string;
-    band: string;
-    mode: string;
-    rst: string;
+// --- Types ---
+type CardSize = 'bureau' | 'postcard' | 'eyeball';
+type CardFinish = 'standard' | 'matte' | 'linen';
+type CardSide = 'front' | 'back';
+
+interface DesignState {
+  size: CardSize;
+  finish: CardFinish;
+  isFolded: boolean;
+  addOns: {
+    roundedCorners: boolean;
+    heavyStock: boolean;
+  };
+  assets: {
+    frontImg: string | null;
+    backImg: string | null;
+  };
+  gridSettings: {
+    showSimulation: boolean;    // The "W1AW" dummy data
+    enableContrast: boolean;    // The semi-transparent box
+    position: { x: number; y: number }; // Coordinate placement
   };
 }
 
-const DEFAULT_IMAGE = "https://images.unsplash.com/photo-1595246140625-573b715d11dc?q=80&w=2670&auto=format&fit=crop";
+// --- Pricing Logic Internalized ---
+const calculateTotal = (state: DesignState) => {
+  const BASES = { bureau: 45, postcard: 55, eyeball: 29 };
+  let price = BASES[state.size];
+  
+  if (state.isFolded) price *= 2;
+  if (state.finish === 'linen') price += (price * 0.20);
+  if (state.addOns.roundedCorners) price += 5;
+  if (state.addOns.heavyStock) price += 10;
+  
+  return price.toFixed(2);
+};
 
-export default function QslCardFactory() {
-  const [design, setDesign] = useState<QslDesign>({
-    callsign: 'K1HAM',
-    gridSquare: 'FN42',
-    backgroundUrl: DEFAULT_IMAGE,
-    themeColor: '#10b981', // Emerald-500
-    qsoData: {
-      toCall: 'W1AW',
-      date: '2023-10-25',
-      time: '14:32 UTC',
-      band: '20M',
-      mode: 'SSB',
-      rst: '59',
-    },
+export default function QslAdvancedDesigner() {
+  const [activeSide, setActiveSide] = useState<CardSide>('front');
+  const [lowResWarning, setLowResWarning] = useState<boolean>(false);
+  
+  const [design, setDesign] = useState<DesignState>({
+    size: 'bureau',
+    finish: 'standard',
+    isFolded: false,
+    addOns: { roundedCorners: false, heavyStock: false },
+    assets: { frontImg: null, backImg: null },
+    gridSettings: {
+      showSimulation: false,
+      enableContrast: false,
+      position: { x: 0, y: 0 }
+    }
   });
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value } = e.target;
-    // Check if it's nested QSO data or top-level design data
-    if (['toCall', 'date', 'time', 'band', 'mode', 'rst'].includes(name)) {
-      setDesign((prev) => ({ ...prev, qsoData: { ...prev.qsoData, [name]: value } }));
-    } else {
-      setDesign((prev) => ({ ...prev, [name]: value }));
+  // --- Handlers ---
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, side: CardSide) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      const url = URL.createObjectURL(file);
+      
+      // Resolution Check (Phase 2 Requirement)
+      const img = new Image();
+      img.src = url;
+      img.onload = () => {
+        // Assume 300 DPI for 3.5" width = 1050px
+        if (img.width < 1050) setLowResWarning(true);
+        else setLowResWarning(false);
+      };
+
+      setDesign(prev => ({
+        ...prev,
+        assets: { ...prev.assets, [side === 'front' ? 'frontImg' : 'backImg']: url }
+      }));
     }
   };
 
+  const handleNudge = (dx: number, dy: number) => {
+    setDesign(prev => ({
+      ...prev,
+      gridSettings: {
+        ...prev.gridSettings,
+        position: {
+          x: prev.gridSettings.position.x + dx,
+          y: prev.gridSettings.position.y + dy
+        }
+      }
+    }));
+  };
+
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-200 font-mono p-4 md:p-8">
+    <div className="min-h-screen bg-slate-950 text-slate-200 font-sans p-4 md:p-8 flex flex-col lg:flex-row gap-8">
       
-      {/* Header */}
-      <header className="mb-8 flex items-center gap-3 border-b border-slate-800 pb-4">
-        <Radio className="text-emerald-500 h-8 w-8 animate-pulse" />
-        <div>
-          <h1 className="text-2xl font-bold tracking-tighter text-emerald-400">QSL FACTORY <span className="text-xs text-slate-500 ml-2">v1.0</span></h1>
-          <p className="text-xs text-slate-500 uppercase tracking-widest">Amateur Radio Design Workbench</p>
-        </div>
-      </header>
-
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+      {/* =======================
+          LEFT: VISUALIZER ENGINE 
+         ======================= */}
+      <div className="lg:w-2/3 flex flex-col gap-6">
         
-        {/* LEFT COLUMN: Controls */}
-        <div className="lg:col-span-4 space-y-6">
-          <div className="bg-slate-900 border border-slate-800 p-6 rounded-lg shadow-xl">
-            <h2 className="text-emerald-500 font-bold mb-4 uppercase text-sm border-l-4 border-emerald-500 pl-2">Station Identity</h2>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-xs uppercase text-slate-500 mb-1">Your Callsign</label>
-                <input
-                  type="text"
-                  name="callsign"
-                  value={design.callsign}
-                  onChange={handleInputChange}
-                  className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-emerald-300 focus:outline-none focus:border-emerald-500 transition-colors uppercase"
-                />
-              </div>
-              <div>
-                <label className="block text-xs uppercase text-slate-500 mb-1">Grid Square</label>
-                <input
-                  type="text"
-                  name="gridSquare"
-                  value={design.gridSquare}
-                  onChange={handleInputChange}
-                  className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-emerald-300 focus:outline-none focus:border-emerald-500 transition-colors uppercase"
-                />
-              </div>
-            </div>
+        {/* Toolbar */}
+        <div className="flex justify-between items-center bg-slate-900 p-4 rounded-lg border border-slate-800">
+          <div className="flex gap-2">
+            <button 
+              onClick={() => setActiveSide('front')}
+              className={`px-4 py-2 rounded text-sm font-bold flex items-center gap-2 ${activeSide === 'front' ? 'bg-emerald-500 text-black' : 'bg-slate-800 text-slate-400'}`}
+            >
+              <CreditCard size={16} /> FRONT
+            </button>
+            <button 
+              onClick={() => setActiveSide('back')}
+              className={`px-4 py-2 rounded text-sm font-bold flex items-center gap-2 ${activeSide === 'back' ? 'bg-emerald-500 text-black' : 'bg-slate-800 text-slate-400'}`}
+            >
+              <Type size={16} /> BACK
+            </button>
           </div>
 
-          <div className="bg-slate-900 border border-slate-800 p-6 rounded-lg shadow-xl">
-            <h2 className="text-amber-500 font-bold mb-4 uppercase text-sm border-l-4 border-amber-500 pl-2">QSO Simulation Data</h2>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs uppercase text-slate-500 mb-1">To Station</label>
-                <input name="toCall" value={design.qsoData.toCall} onChange={handleInputChange} className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-sm" />
-              </div>
-              <div>
-                <label className="block text-xs uppercase text-slate-500 mb-1">Band</label>
-                <input name="band" value={design.qsoData.band} onChange={handleInputChange} className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-sm" />
-              </div>
-              <div>
-                <label className="block text-xs uppercase text-slate-500 mb-1">Mode</label>
-                <input name="mode" value={design.qsoData.mode} onChange={handleInputChange} className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-sm" />
-              </div>
-              <div>
-                <label className="block text-xs uppercase text-slate-500 mb-1">RST</label>
-                <input name="rst" value={design.qsoData.rst} onChange={handleInputChange} className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-sm" />
-              </div>
-            </div>
-            <div className="mt-4 pt-4 border-t border-slate-800">
-               <button className="flex items-center gap-2 text-xs text-slate-400 hover:text-white transition-colors w-full justify-center">
-                  <Upload size={14} /> Import ADIF File
-               </button>
-            </div>
+          <div className="flex items-center gap-4">
+            {activeSide === 'back' && (
+              <>
+                <label className="flex items-center gap-2 text-xs cursor-pointer select-none">
+                  <input 
+                    type="checkbox" 
+                    checked={design.gridSettings.showSimulation}
+                    onChange={(e) => setDesign(prev => ({...prev, gridSettings: {...prev.gridSettings, showSimulation: e.target.checked}}))}
+                    className="accent-emerald-500"
+                  />
+                  QSO Sim
+                </label>
+                <label className="flex items-center gap-2 text-xs cursor-pointer select-none">
+                  <input 
+                    type="checkbox" 
+                    checked={design.gridSettings.enableContrast}
+                    onChange={(e) => setDesign(prev => ({...prev, gridSettings: {...prev.gridSettings, enableContrast: e.target.checked}}))}
+                    className="accent-emerald-500"
+                  />
+                  Contrast Box
+                </label>
+                {/* Nudge Controls */}
+                <div className="flex items-center bg-slate-800 rounded px-2 py-1 gap-2">
+                  <Move size={14} className="text-slate-400" />
+                  <button onClick={() => handleNudge(0, -5)} className="hover:text-white">↑</button>
+                  <button onClick={() => handleNudge(0, 5)} className="hover:text-white">↓</button>
+                  <button onClick={() => handleNudge(-5, 0)} className="hover:text-white">←</button>
+                  <button onClick={() => handleNudge(5, 0)} className="hover:text-white">→</button>
+                </div>
+              </>
+            )}
           </div>
         </div>
 
-        {/* RIGHT COLUMN: The Visualizer */}
-        <div className="lg:col-span-8 flex flex-col items-center justify-start">
+        {/* The Stage */}
+        <div className="flex-1 flex items-center justify-center bg-slate-900/50 rounded-xl p-8 border border-slate-800 relative overflow-hidden">
           
-          <div className="w-full flex justify-between items-center mb-4">
-            <h3 className="text-sm uppercase text-slate-400">Live Preview (3.5" x 5.5")</h3>
-            <div className="flex gap-2">
-                <button className="bg-slate-800 hover:bg-slate-700 text-white px-3 py-1 rounded text-xs flex items-center gap-2 transition-colors">
-                    <RefreshCw size={12} /> Randomize BG
-                </button>
-                <button className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-1 rounded text-xs flex items-center gap-2 font-bold transition-colors shadow-lg shadow-emerald-900/50">
-                    <Printer size={12} /> ORDER PRINTS
-                </button>
+          {/* Resolution Warning Toast */}
+          {lowResWarning && (
+            <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-amber-500/90 text-black px-4 py-2 rounded-full text-xs font-bold flex items-center gap-2 z-50 animate-bounce">
+              <AlertTriangle size={14} /> Low Resolution Image (&lt;300 DPI)
             </div>
-          </div>
+          )}
 
-          {/* THE CARD ITSELF - Fixed Aspect Ratio Container */}
-          {/* Standard Postcard is 3.5x5.5 inches. Aspect Ratio ~1.57 */}
-          <div className="relative w-full max-w-3xl aspect-[1.57/1] shadow-2xl rounded-sm overflow-hidden group">
-            
+          {/* CARD PREVIEW */}
+          <div 
+            className={`
+              relative bg-white shadow-2xl transition-all duration-500 ease-in-out
+              ${design.finish === 'linen' ? 'brightness-95 contrast-[1.05]' : ''} 
+              ${design.addOns.roundedCorners ? 'rounded-2xl' : 'rounded-none'}
+            `}
+            style={{
+              width: design.size === 'bureau' ? '550px' : design.size === 'postcard' ? '600px' : '350px',
+              height: design.size === 'bureau' ? '350px' : design.size === 'postcard' ? '400px' : '200px',
+              // Linen Texture Simulation using CSS Gradient
+              backgroundImage: design.finish === 'linen' 
+                ? `repeating-linear-gradient(45deg, transparent, transparent 1px, rgba(0,0,0,0.03) 1px, rgba(0,0,0,0.03) 2px)` 
+                : 'none'
+            }}
+          >
             {/* Background Image Layer */}
-            <div 
-              className="absolute inset-0 bg-cover bg-center transition-transform duration-700 group-hover:scale-105"
-              style={{ backgroundImage: `url(${design.backgroundUrl})` }}
-            >
-              {/* Overlay for readability */}
-              <div className="absolute inset-0 bg-black/40"></div>
+            <div className="absolute inset-0 overflow-hidden">
+               {activeSide === 'front' && design.assets.frontImg ? (
+                 <img src={design.assets.frontImg} className="w-full h-full object-cover" />
+               ) : activeSide === 'back' && design.assets.backImg ? (
+                 <img src={design.assets.backImg} className="w-full h-full object-cover opacity-50" />
+               ) : (
+                 <div className="w-full h-full flex flex-col items-center justify-center text-slate-300 bg-slate-100">
+                    <Upload size={32} className="mb-2 text-slate-400" />
+                    <span className="text-xs font-bold uppercase tracking-widest text-slate-400">Drag & Drop {activeSide}</span>
+                    <input 
+                      type="file" 
+                      className="absolute inset-0 opacity-0 cursor-pointer"
+                      onChange={(e) => handleFileUpload(e, activeSide)}
+                    />
+                 </div>
+               )}
             </div>
 
-            {/* Design Layer */}
-            <div className="absolute inset-0 p-8 md:p-12 flex flex-col justify-between">
-                
-                {/* Header: Callsign */}
-                <div className="flex justify-between items-start">
-                    <div>
-                        <h1 
-                          className="text-6xl md:text-8xl font-black tracking-tighter text-white drop-shadow-[0_5px_5px_rgba(0,0,0,0.8)]"
-                          style={{ fontFamily: 'Arial, sans-serif' }} // Or a custom font
-                        >
-                            {design.callsign || 'CALL'}
-                        </h1>
-                        <div className="flex items-center gap-2 mt-2">
-                             <span className="bg-emerald-500 text-black font-bold px-2 py-0.5 text-sm rounded-sm">GRID: {design.gridSquare}</span>
-                             <span className="text-white/80 text-sm font-medium tracking-wide">ITU Zone 8 • CQ Zone 5</span>
-                        </div>
-                    </div>
-                    
-                    {/* Retro Badge */}
-                    <div className="border-2 border-white/30 rounded-full h-24 w-24 flex items-center justify-center backdrop-blur-sm">
-                        <span className="text-white/50 text-xs font-bold -rotate-12">QSL<br/>VIA<br/>BURO</span>
-                    </div>
+            {/* Back Side: QSO Logic & Overlays */}
+            {activeSide === 'back' && (
+              <div 
+                className="absolute inset-0 p-6 flex flex-col justify-center"
+                style={{ 
+                  transform: `translate(${design.gridSettings.position.x}px, ${design.gridSettings.position.y}px)` 
+                }}
+              >
+                {/* Contrast Box */}
+                <div className={`
+                  ${design.gridSettings.enableContrast ? 'bg-white/80 backdrop-blur-sm border border-slate-200 shadow-sm' : ''} 
+                  p-4 rounded transition-all duration-200
+                `}>
+                  {/* Standard QSL Grid Layout */}
+                  <div className="grid grid-cols-6 gap-2 text-[10px] uppercase font-bold tracking-wider text-slate-500 border-b-2 border-slate-300 pb-1 mb-2">
+                    <div>Station</div>
+                    <div>Day/M/Year</div>
+                    <div>Time</div>
+                    <div>Band</div>
+                    <div>Mode</div>
+                    <div>RST</div>
+                  </div>
+                  
+                  {/* Simulation Data or Placeholders */}
+                  <div className={`grid grid-cols-6 gap-2 text-sm font-mono ${design.gridSettings.showSimulation ? 'text-slate-900' : 'text-slate-300'}`}>
+                    <div>{design.gridSettings.showSimulation ? 'W1AW' : '————'}</div>
+                    <div>{design.gridSettings.showSimulation ? '12/10/25' : '————'}</div>
+                    <div>{design.gridSettings.showSimulation ? '14:00' : '————'}</div>
+                    <div>{design.gridSettings.showSimulation ? '20M' : '————'}</div>
+                    <div>{design.gridSettings.showSimulation ? 'CW' : '————'}</div>
+                    <div>{design.gridSettings.showSimulation ? '599' : '————'}</div>
+                  </div>
                 </div>
-
-                {/* Footer: QSO Table */}
-                <div className="bg-slate-900/90 backdrop-blur-md border-t-4 border-emerald-500 text-slate-200 p-4 rounded-sm shadow-lg">
-                    <div className="grid grid-cols-6 text-xs uppercase text-slate-500 font-bold mb-2 tracking-wider">
-                        <div>To Radio</div>
-                        <div>Date</div>
-                        <div>Time</div>
-                        <div>Band</div>
-                        <div>Mode</div>
-                        <div>RST</div>
-                    </div>
-                    <div className="grid grid-cols-6 text-lg md:text-2xl font-mono text-emerald-400 items-baseline">
-                        <div className="text-white">{design.qsoData.toCall}</div>
-                        <div>{design.qsoData.date.split('-').slice(1).join('/')}</div>
-                        <div>{design.qsoData.time}</div>
-                        <div>{design.qsoData.band}</div>
-                        <div>{design.qsoData.mode}</div>
-                        <div>{design.qsoData.rst}</div>
-                    </div>
-                    <div className="mt-2 text-xs text-slate-400 italic text-right">
-                        Tnx for the QSO! 73, {design.callsign}
-                    </div>
-                </div>
-
-            </div>
+              </div>
+            )}
+            
           </div>
-          
-          <p className="mt-4 text-xs text-slate-600">
-            *High-Gloss UV Coating applied to front side. 14pt Cardstock.
-          </p>
-
         </div>
       </div>
+
+      {/* =======================
+          RIGHT: PRODUCTION OPTIONS
+         ======================= */}
+      <div className="lg:w-1/3 bg-slate-900 border-l border-slate-800 p-6 shadow-2xl overflow-y-auto">
+        <h2 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
+          <Layers className="text-emerald-500" /> Production Specs
+        </h2>
+
+        {/* 1. Size Selection */}
+        <section className="mb-8">
+          <h3 className="text-xs uppercase text-slate-500 font-bold mb-3">Card Size</h3>
+          <div className="space-y-2">
+            {[
+              { id: 'bureau', label: '3.5" x 5.5"', sub: 'Bureau Standard', tip: 'Accepted by ARRL & Int\'l Bureaus' },
+              { id: 'postcard', label: '4.0" x 6.0"', sub: 'Standard Postcard', tip: 'Great for direct mailing' },
+              { id: 'eyeball', label: '2.0" x 3.5"', sub: 'Eyeball QSL', tip: 'Business card size for hamfests' },
+            ].map((opt) => (
+              <div 
+                key={opt.id}
+                onClick={() => setDesign(p => ({...p, size: opt.id as CardSize}))}
+                className={`
+                  group relative flex items-center justify-between p-3 rounded cursor-pointer border transition-all
+                  ${design.size === opt.id ? 'bg-emerald-500/10 border-emerald-500 text-emerald-400' : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-600'}
+                `}
+              >
+                <div>
+                  <div className="font-bold">{opt.label}</div>
+                  <div className="text-xs opacity-70">{opt.sub}</div>
+                </div>
+                
+                {/* Info Tooltip */}
+                <div className="relative group/icon">
+                   <Info size={16} className="text-slate-600 group-hover:text-emerald-500" />
+                   <div className="absolute right-8 top-0 w-48 bg-black text-white text-xs p-2 rounded shadow-xl hidden group-hover/icon:block z-50">
+                      {opt.tip}
+                   </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* 2. Finish Selection */}
+        <section className="mb-8">
+          <h3 className="text-xs uppercase text-slate-500 font-bold mb-3">Paper Finish</h3>
+          <div className="grid grid-cols-1 gap-2">
+             <FinishCard 
+                active={design.finish === 'standard'} 
+                title="Glossy Front" 
+                desc="High-Gloss UV front, Matte back for writing." 
+                onClick={() => setDesign(p => ({...p, finish: 'standard'}))} 
+             />
+             <FinishCard 
+                active={design.finish === 'matte'} 
+                title="Full Matte" 
+                desc="Elegant, non-reflective finish on both sides." 
+                onClick={() => setDesign(p => ({...p, finish: 'matte'}))} 
+             />
+             <FinishCard 
+                active={design.finish === 'linen'} 
+                title="Linen Texture" 
+                desc="Premium woven texture feels like canvas." 
+                price="+20%"
+                onClick={() => setDesign(p => ({...p, finish: 'linen'}))} 
+             />
+          </div>
+        </section>
+
+        {/* 3. Add-Ons & Folding */}
+        <section className="mb-8">
+          <h3 className="text-xs uppercase text-slate-500 font-bold mb-3">Upgrades</h3>
+          <div className="space-y-3">
+            <ToggleRow 
+              label="Rounded Corners" 
+              price="+$5.00" 
+              checked={design.addOns.roundedCorners} 
+              onChange={() => setDesign(p => ({...p, addOns: {...p.addOns, roundedCorners: !p.addOns.roundedCorners}}))} 
+            />
+            <ToggleRow 
+              label="Heavy Stock (16pt)" 
+              price="+$10.00" 
+              checked={design.addOns.heavyStock} 
+              onChange={() => setDesign(p => ({...p, addOns: {...p.addOns, heavyStock: !p.addOns.heavyStock}}))} 
+            />
+            <div className="h-px bg-slate-800 my-4"></div>
+            <ToggleRow 
+              label="Folded Card (7x5.5)" 
+              price="2x Price" 
+              highlight 
+              checked={design.isFolded} 
+              onChange={() => setDesign(p => ({...p, isFolded: !p.isFolded}))} 
+            />
+          </div>
+        </section>
+
+        {/* Total Price Sticky Footer */}
+        <div className="bg-slate-950 p-4 rounded-lg border border-slate-800 mt-auto">
+          <div className="flex justify-between items-end">
+             <span className="text-slate-400 text-sm">Estimated Total (100 Cards)</span>
+             <span className="text-3xl font-mono text-emerald-400">${calculateTotal(design)}</span>
+          </div>
+          <button className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 mt-4 rounded transition-colors uppercase tracking-widest text-sm">
+             Add to Cart
+          </button>
+        </div>
+
+      </div>
     </div>
+  );
+}
+
+// --- Sub-Components ---
+
+function FinishCard({ active, title, desc, price, onClick }: any) {
+  return (
+    <div 
+      onClick={onClick}
+      className={`
+        p-3 rounded border cursor-pointer transition-all
+        ${active ? 'bg-emerald-500/10 border-emerald-500' : 'bg-slate-950 border-slate-800 hover:border-slate-600'}
+      `}
+    >
+      <div className="flex justify-between">
+        <span className={`font-bold ${active ? 'text-emerald-400' : 'text-slate-300'}`}>{title}</span>
+        {price && <span className="text-xs bg-emerald-900 text-emerald-300 px-1.5 py-0.5 rounded">{price}</span>}
+      </div>
+      <p className="text-xs text-slate-500 mt-1">{desc}</p>
+    </div>
+  );
+}
+
+function ToggleRow({ label, price, checked, onChange, highlight }: any) {
+  return (
+    <label className="flex items-center justify-between cursor-pointer group">
+      <div className="flex items-center gap-3">
+        <div className={`w-5 h-5 rounded border flex items-center justify-center transition-colors ${checked ? 'bg-emerald-600 border-emerald-600' : 'bg-slate-900 border-slate-700'}`}>
+          {checked && <CheckCircle2 size={14} className="text-white" />}
+        </div>
+        <span className={`${highlight ? 'text-white font-bold' : 'text-slate-300'}`}>{label}</span>
+      </div>
+      <span className={`text-xs ${highlight ? 'text-emerald-400' : 'text-slate-500'}`}>{price}</span>
+      <input type="checkbox" className="hidden" checked={checked} onChange={onChange} />
+    </label>
   );
 }
